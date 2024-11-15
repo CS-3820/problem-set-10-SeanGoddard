@@ -108,7 +108,12 @@ subst x m (Var y)
   | otherwise = Var y
 subst x m (Lam y n) = Lam y (substUnder x m y n)
 subst x m (App n1 n2) = App (subst x m n1) (subst x m n2)
-subst x m n = undefined
+subst x m (Throw n) = Throw (subst x m n) 
+subst x m (Catch t y n) 
+  | x == y    = Catch (subst x m t) y n 
+  | otherwise = Catch (subst x m t) y (subst x m n)
+subst x m Recall = Recall
+subst x m (Store n) = Store (subst x m n)  
 
 {-------------------------------------------------------------------------------
 
@@ -202,7 +207,41 @@ bubble; this won't *just* be `Throw` and `Catch.
 -------------------------------------------------------------------------------}
 
 smallStep :: (Expr, Expr) -> Maybe (Expr, Expr)
-smallStep = undefined
+smallStep (Const _, _) = Nothing
+smallStep (Plus (Const i) (Const j), s) = Just (Const (i + j), s)
+smallStep (Var _, _) = Nothing
+smallStep (Lam _ _, _) = Nothing
+smallStep (Plus m n, s)
+  = case (smallStep (m, s)) of
+      Just (m', s') -> Just (Plus m' n, s')
+      _ -> case smallStep (n, s) of
+        Just (n', s') -> Just (Plus m n', s')
+        _ -> Nothing 
+smallStep (App (Lam x m) n, s)
+  | isValue n = Just (subst x n m, s)
+  | otherwise = case smallStep (n, s) of
+      Just (n', s') -> Just (App (Lam x m) n', s')
+      _ -> Nothing
+smallStep (App m n, s) =
+  case (smallStep (m, s)) of
+      (Just (m', s')) -> Just (App m' n, s')
+      Nothing -> case smallStep (n, s) of
+        (Just (n', s')) -> Just (App m n', s)
+        _ -> Nothing 
+smallStep (Recall, s) = Just (s, s)
+smallStep (Store m, s)
+  | isValue m = Just (m, m)
+  | otherwise = case smallStep (m, s) of
+    Just (m', s') -> Just (Store m', s')
+    _ -> Nothing
+smallStep (Throw m, s)
+  | isValue m = Just (Throw m, s) 
+  | otherwise = case smallStep (m, s) of
+      Just (m', s') -> Just (Throw m', s')  
+smallStep (Catch m y n, s) =
+  case smallStep (m, s) of
+    Just (Throw m', s') -> Just (subst y m' n, s') 
+    Just (m', s') -> Just (Catch m' y n, s')
 
 steps :: (Expr, Expr) -> [(Expr, Expr)]
 steps s = case smallStep s of
